@@ -4,6 +4,7 @@ from threading import RLock
 from typing import Iterable, Union, Dict
 from contextlib import contextmanager
 
+from mcdreforged.api.decorator import new_thread
 from mcdreforged.api.rtext import RTextBase
 
 
@@ -75,6 +76,7 @@ class AbstractCommand:
         prefix = cls.NAME if isinstance(cls.NAME, str) else '/'.join(cls.NAME)
         return f"{prefix}: {msg}"
 
+    @new_thread('Task Executor')
     def _secure_run(self, func, *sargs, **kwargs):
         try:
             func(*sargs, **kwargs)
