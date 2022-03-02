@@ -1,4 +1,6 @@
+from cProfile import run
 from json.decoder import JSONDecodeError
+from signal import raise_signal
 import sys
 import time
 import threading
@@ -6,16 +8,25 @@ import traceback
 import json
 import re
 import os
+import logging
 
+from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit import prompt
 from typing import Any, Dict, List, Union, Optional, Tuple
 from parse import parse
 from mcdreforged.api.rtext import *
 from mcdreforged.api.utils import Serializable, deserialize
-from logger import *
+from mcdreforged.api.types import MCDReforgedLogger
+from mcdreforged.api.decorator import new_thread
 
 LOG_FILE = 'dummy_server.log'
 VERBOSE = True
 logger = None
+SPLIT_LOG = True
+HELP_MSG = '''stop/end/exit: Exit this dummy server
+list: Show a fake player list
+save/save-all: Show a fake saved message
+tellraw: Show colored text'''
 
 
 class DummyServerLogger(MCDReforgedLogger):
@@ -28,8 +39,7 @@ class DummyServerLogger(MCDReforgedLogger):
         'ERROR': 'white',
         'CRITICAL': 'white',
     }
-
-    FILE_FMT = NoColorFormatter(
+    FILE_FMT = MCDReforgedLogger.FILE_FMT.__class__(
         '[%(asctime)s] [%(threadName)s/%(levelname)s]: %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
@@ -37,7 +47,8 @@ class DummyServerLogger(MCDReforgedLogger):
     @classmethod
     def get_console_formatter(cls, plugin_id=None):
         extra = '' if plugin_id is None else ' [{}]'.format(plugin_id)
-        return MCColoredFormatter(
+        fmt = super().get_console_formatter().__class__
+        return fmt(
             f'[%(asctime)s] [%(threadName)s/%(log_color)s%(levelname)s%(reset)s]{extra}: %(message_log_color)s%(message)s%(reset)s',
             log_colors=cls.LOG_COLORS,
             secondary_log_colors=cls.SECONDARY_LOG_COLORS,
@@ -61,6 +72,17 @@ class DummyServerLogger(MCDReforgedLogger):
             cls.__gl_instance = cls()
             cls.__gl_instance.set_file(LOG_FILE)
         return cls.__gl_instance
+
+    def _log(self, level: int, msg: object, *args, **kwargs) -> None:
+        if isinstance(msg, RTextBase):
+            msg = msg.to_colored_text()
+        elif not isinstance(msg, str):
+            msg = str(msg)
+        if SPLIT_LOG:
+            for line in msg.splitlines():
+                super()._log(level, line, *args, **kwargs)
+        else:
+            super()._log(level, msg, *args, **kwargs)
 
 
 class ClickEvent(Serializable):
@@ -142,6 +164,10 @@ class RTextSerializer(Serializable):
         return deserialize(data, cls)
 
 
+class DummyInterrupted(Exception):
+    pass
+
+
 def get_rtext_list(original_list: list):
     rt = RTextList()
     for item in original_list:
@@ -195,51 +221,62 @@ def log(msg: Union[RTextBase, str]):
     DummyServerLogger.get_instance().info(msg)
 
 
+def loop_print(times: int):
+    for num in range(1, times):
+        time.sleep(1)
+        print(num)
+
+
 def main(start_time: float):
-    running = True
-    time.sleep(0.001)
-    log('Starting dummy server v0.1')
-    log(f'Done ({round(time.time() - start_time, 3)}s)! For help, type "help"')
-    while running:
-        text = input()
-        try:
+    try:
+        time.sleep(0.001)
+        log('Starting dummy server v0.1')
+        log(f'Done ({round(time.time() - start_time, 3)}s)! For help, type "help"')
+        
+        @new_thread('Server Thread')
+        def command_exec(text: str):
+            try:
+                if text == 'list':
+                    log('There are 0 of a max 100 players online:')
+                elif text == 'help':
+                    log(HELP_MSG)
+                elif parse('tellraw {target} {content}', text):
+                    psd = parse('tellraw {target} {content}', text)['content']
+                    try:
+                        log(rtext_formatter(psd))
+                    except JSONDecodeError:
+                        log(psd)
+                elif text == 'info':
+                    log(RTextList(
+                        RText('--- ', RColor.gray), RText('Dummy server for MCDR'), RText(' ---', RColor.gray), '\n',
+                        RText('CLI Version 0.0.0 '), RText(" Work in progress", RColor.yellow)
+                    ))
+                elif text == 'rue':
+                    loop_print(6)
+                elif text == 'raise':
+                    raise RuntimeError('Raised on purpose')
+                elif text.split(' ', 1)[0] in ['save', 'save-all']:
+                    log('Saved the game')
+                else:
+                    log(text)
+            except:
+                DummyServerLogger.get_instance().exception(RText(f'Error occured in {threading.current_thread().getName()}:', RColor.red))
+            
+
+        while True:
+            text = prompt('> ')
             if text in ['stop', 'end', 'exit']:
                 log('Stopping the server')
                 break
-            elif text == 'list':
-                log('There are 0 of a max 100 players online:')
-            elif text == 'help':
-                log(
-                    '''stop/end/exit: Exit this dummy server
-list: Show a fake player list
-save/save-all: Show a fake saved message
-tellraw: Show colored text''')
-            elif parse('tellraw {target} {content}', text):
-                psd = parse('tellraw {target} {content}', text)['content']
-                try:
-                    log(rtext_formatter(psd))
-                except JSONDecodeError:
-                    log(psd)
-            elif text == 'info':
-                log(RTextList(
-                    RText('--- ', RColor.gray), RText('Dummy server for MCDR'), RText(' ---', RColor.gray), '\n',
-                    RText('CLI Version 0.0.0 '), RText(" Work in progress", RColor.yellow)
-                ))
-            elif text == 'raise':
-                raise RuntimeError('Raised on purpose')
-            elif text.split(' ', 1)[0] in ['save', 'save-all']:
-                log('Saved the game')
             else:
-                log(text)
-        except (EOFError, KeyboardInterrupt):
-            log('Interrupted server')
-            break
-        except:
-            log(RTextList(RText(f'Error occured in {threading.current_thread().getName()}:', RColor.red), '\n  ',
-                          '\n  '.join(traceback.format_exc().splitlines())))
+                command_exec(text)
 
-    log('Stopping server')
+        log('Stopping server')
+    except (EOFError, KeyboardInterrupt):
+        log('Server Interrupted')
+    log('rue')
 
 
 if __name__ == '__main__':
-    sys.exit(main(time.time()))
+    with patch_stdout(raw=True):
+        sys.exit(main(time.time()))
