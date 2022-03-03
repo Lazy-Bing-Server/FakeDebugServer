@@ -6,5 +6,5 @@ class CommandSave(AbstractCommand):
     NAME = 'save', 'save-all'
     HELP = 'Show a fake saved message'
 
-    def _direct(self):
+    def _direct(self, *args):
         log('Saved the game')

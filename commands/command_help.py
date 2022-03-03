@@ -9,7 +9,7 @@ tellraw: Show colored text'''
 
 
 class CommandHelp(AbstractCommand):
-    NAME = ['help', 'dummy']
+    NAME = 'help'
     HELP = 'Show command help'
 
     def _direct(self):

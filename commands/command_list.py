@@ -6,5 +6,5 @@ class CommandList(AbstractCommand):
     NAME = 'list'
     HELP = 'Show a fake player list'
 
-    def _direct(self):
+    def _direct(self, *args):
         log('There are 0 of a max 100 players online:')
