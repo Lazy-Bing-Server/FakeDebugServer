@@ -12,7 +12,8 @@ from utils.logger import get_logger, log
 def main(start_time: float):
     try:
         time.sleep(0.001)
-        log('Starting dummy server v0.1')
+        # log('Starting minecraft server version 1.19.2')
+        log(f"Current encoding method: {sys.getfilesystemencoding()}")
         AbstractCommand._refresh()
         log(f'Done ({round(time.time() - start_time, 3)}s)! For help, type "help"')
         
@@ -28,6 +29,7 @@ def main(start_time: float):
 
         while True:
             text = input()
+            # log(f'Parsing command {text}')
             if text in AbstractCommand.SHUTDOWN_KEYWORDS:
                 log('Stopping the server')
                 break

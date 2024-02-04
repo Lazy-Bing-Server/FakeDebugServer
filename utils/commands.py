@@ -1,11 +1,20 @@
 import importlib
 import os
-from threading import RLock
+from threading import RLock, current_thread
 from typing import Iterable, Union, Dict
 from contextlib import contextmanager
+from utils.logger import get_logger, log
 
 from mcdreforged.api.decorator import new_thread
 from mcdreforged.api.rtext import RTextBase
+
+
+__all__ = [
+    "AbstractCommand",
+    "CommandException",
+    "CommandRegistryError",
+    "CommandParsingError",
+]
 
 
 class AbstractCommand:
@@ -52,12 +61,19 @@ class AbstractCommand:
     @classmethod
     def _parse(cls, cmd: str):
         with cls.cmd_gl_lock:
-            cmd = cmd.split(' ')
+            cmd = cmd.strip().split(' ')
             node = cls.__registered.get(cmd[0])
-            if node is None:
-                raise CommandParsingError(' '.join(cmd))
-            else:
-                node()._parse_command(cmd)
+            try:
+                if node is None:
+                    raise CommandParsingError(' '.join(cmd))
+                else:
+                    node()._parse_command(*cmd)
+            except CommandParsingError as e:
+                cmd = e.failed_command
+                if cmd is None:
+                    cmd = ''
+                log(cmd)
+
 
     @property
     def _methods(self):
@@ -76,18 +92,22 @@ class AbstractCommand:
         prefix = cls.NAME if isinstance(cls.NAME, str) else '/'.join(cls.NAME)
         return f"{prefix}: {msg}"
 
-    @new_thread('Task Executor')
+    @new_thread('TaskExecutor')
     def _secure_run(self, func, *sargs, **kwargs):
         try:
-            func(*sargs, **kwargs)
-        except (TypeError, NotImplementedError) as e:
-            raise CommandParsingError(' '.join(self.__cmd_cache))
+            try:
+                func(*sargs, **kwargs)
+            except (TypeError, NotImplementedError) as e:
+                raise CommandParsingError(' '.join(self.__cmd_cache))
+        except Exception as exc:
+            get_logger().exception(f'Exception in thread {current_thread().name}', exc_info=exc)
+
 
     @contextmanager
     def _cache_command(self, *args):
         with self.cmd_gl_lock:
             try:
-                result = list(*args)
+                result = list(args)
                 self.__cmd_cache = result.copy()
                 result.pop(0)
                 yield result
@@ -97,8 +117,7 @@ class AbstractCommand:
     def _parse_command(self, *args):
         with self._cache_command(*args) as editable_args:
             if len(editable_args) != 0 and editable_args[0] in self._methods.keys():
-                handler = self._methods.get(args[1])
-                editable_args.pop(0)
+                handler = self._methods.get(editable_args.pop(0))
                 self._secure_run(handler, *editable_args)
             else:
                 self._secure_run(self._direct, *editable_args)
@@ -109,6 +128,10 @@ class AbstractCommand:
     @property
     def _current_command(self):
         return self.__cmd_cache
+
+    @classmethod
+    def _get_command(cls, command: str, default=None):
+        return cls.__registered.get(command, default)
 
 
 class CommandException(Exception):
@@ -121,6 +144,11 @@ class CommandRegistryError(Exception):
 
 class CommandParsingError(Exception):
     def __init__(self, command_str: str = None):
+        self.__failed_command = command_str
         super(CommandParsingError, self).__init__(
             RTextBase.format('Command Error: {}', command_str)
         )
+
+    @property
+    def failed_command(self):
+        return self.__failed_command

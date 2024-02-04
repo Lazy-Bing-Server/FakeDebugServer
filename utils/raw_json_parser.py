@@ -105,11 +105,8 @@ def convert_rtext(js: Union[list, dict, str]) -> RTextBase:
             js = json.loads(js)
         except JSONDecodeError:
             pass
-    if isinstance(js, list):
-        return get_rtext_list(js)
-    elif isinstance(js, str):
+
+    if isinstance(js, str):
         return RText(js)
     else:
-        rt = RTextSerializer.deserialize(js)
-        rt = RText(rt) if isinstance(rt, str) else rt.get()
-        return rt
+        return RTextBase.from_json_object(js)
